@@ -1,6 +1,5 @@
-### Product Name: **Promptly**
-
-### Product Description:  
+## **Promptly**
+  
 **Promptly** is a user-friendly, Dockerized notification bot designed for teams and communities on Discord. It simplifies event reminders and updates by providing customizable message themes, secure configuration, and seamless deployment. With **Promptly**, users can:  
 
 - Effortlessly manage meeting notifications with customizable `.env` files.  
