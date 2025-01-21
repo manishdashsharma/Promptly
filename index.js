@@ -1,11 +1,10 @@
 import dotenv from "dotenv";
-import { Client, GatewayIntentBits, PermissionsBitField } from "discord.js";
+import { Client, GatewayIntentBits, PermissionsBitField , Collection} from "discord.js";
 import schedule from "node-schedule";
 import fs from "fs/promises";
 
 dotenv.config();
 
-// Environment variables with validation
 const TOKEN = process.env.BOT_TOKEN;
 const COMMAND_CHANNEL_ID = process.env.BOT_CHANNEL_ID;
 let NOTIFICATION_CHANNELS = {};
@@ -23,14 +22,16 @@ const BOT_NAME = process.env.BOT_NAME || "Meeting Bot";
 const THEME = process.env.THEME || "default";
 const MEETINGS_FILE = "meetings.json";
 
-// Helper Functions
+const conversationStates = new Collection();
+const CONVERSATION_TIMEOUT = 300000;
+
 async function loadMeetings() {
   try {
     const data = await fs.readFile(MEETINGS_FILE, "utf-8");
     return JSON.parse(data);
   } catch (error) {
     if (error.code === "ENOENT") {
-      // If file doesn't exist, create it with empty array
+
       await saveMeetings([]);
       return [];
     }
@@ -47,62 +48,329 @@ async function saveMeetings(meetings) {
   }
 }
 
-function formatMeetingMessage(meeting, theme = "product") {
-  const themes = {
-    default: {
-      prefix: "📅",
-      separator: "\n",
-      titlePrefix: "**Title**:",
-      agendaPrefix: "**Agenda**:",
-      timePrefix: "**Time**:",
+const themes = {
+  executive: {
+    prefix: "🎯",
+    separator: "\n\n",
+    decorator: "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    titlePrefix: "📊 **Meeting Overview**",
+    agendaPrefix: "🎯 **Key Points**",
+    timePrefix: "⏰ **Schedule**",
+    channelPrefix: "📢 **Channel**",
+    notesPrefix: "📝 **Additional Notes**",
+    footer: "\n\n*Your insights are invaluable to our success. We look forward to your participation.* ✨"
+  },
+  corporate: {
+    prefix: "⚡",
+    separator: "\n\n",
+    decorator: "════════════════════════════════════",
+    titlePrefix: "📈 **Strategic Meeting**",
+    agendaPrefix: "📋 **Agenda Items**",
+    timePrefix: "🕒 **Timing**",
+    channelPrefix: "📢 **Channel**",
+    notesPrefix: "📌 **Key Information**",
+    footer: "\n\n*Together we drive excellence. Your presence is essential.* 🎯"
+  },
+  modern: {
+    prefix: "💫",
+    separator: "\n\n",
+    decorator: "──────────────────────────────",
+    titlePrefix: "🔮 **Session**",
+    agendaPrefix: "🎯 **Focus Areas**",
+    timePrefix: "⏳ **Time**",
+    channelPrefix: "📢 **Channel**",
+    notesPrefix: "💡 **Notes**",
+    footer: "\n\n*Be part of something extraordinary. Your perspective matters.* 🚀"
+  },
+  minimal: {
+    prefix: "●",
+    separator: "\n\n",
+    decorator: "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯",
+    titlePrefix: "∙ **Meeting**",
+    agendaPrefix: "∙ **Agenda**",
+    timePrefix: "∙ **Time**",
+    channelPrefix: "∙ **Channel**",
+    notesPrefix: "∙ **Notes**",
+    footer: "\n\n*We value your contribution.* ○"
+  },
+  product: {
+    prefix: "🎯",
+    separator: "\n\n",
+    decorator: "━━━━━━━━━━━━━━━━━━━━━━━",
+    titlePrefix: "📌 **Title**",
+    agendaPrefix: "📝 **Agenda**",
+    timePrefix: "⏰ **Time**",
+    channelPrefix: "📢 **Channel**",
+    notesPrefix: "📋 **Notes**",
+    footer: "\n*Your presence matters. See you there!* ✨"
+  },
+  holiday: {
+    prefix: "🎉",
+    separator: "\n\n",
+    decorator: "∽∽∽∽∽∽∽∽∽∽∽∽∽∽∽∽∽∽∽∽∽∽∽∽",
+    titlePrefix: "🎊 **Holiday Celebration**",
+    agendaPrefix: "🎈 **Activities**",
+    timePrefix: "🕰️ **Event Time**",
+    channelPrefix: "📣 **Meeting Point**",
+    notesPrefix: "✨ **Important Details**",
+    footer: "\n\n*Let's celebrate together! Join us for some festive fun.* 🎄"
+  },
+  intern: {
+    prefix: "🌟",
+    separator: "\n\n",
+    decorator: "· · · · · · · · · · · · · · · · · ·",
+    titlePrefix: "📚 **Learning Session**",
+    agendaPrefix: "💡 **Today's Topics**",
+    timePrefix: "⌚ **Meeting Time**",
+    channelPrefix: "🎓 **Meeting Room**",
+    notesPrefix: "📝 **Preparation Notes**",
+    footer: "\n\n*Your growth journey matters! Come ready to learn and share.* 🚀"
+  }
+};
+
+
+// Replace the existing formatMeetingMessage function with this enhanced version
+function formatMeetingMessage(meeting, theme = "corporate") {
+  const style = themes[theme] || themes.executive;
+  
+  // Format agenda items with proper indentation and spacing
+  const formattedAgenda = meeting.agenda
+    .split(/(?=\d+\.|\n)/g)
+    .map(item => item.trim())
+    .filter(Boolean)
+    .join('\n   ');
+
+  let message = '';
+  
+  // Add header decorator
+  if (style.decorator) {
+    message += `${style.decorator}\n\n`;
+  }
+
+  // Build main content
+  message += [
+    `${style.prefix} ${style.titlePrefix}\n   ${meeting.title}`,
+    `${style.agendaPrefix}\n   ${formattedAgenda}`,
+    `${style.timePrefix}\n   ${meeting.time}`,
+    `${style.channelPrefix}\n   #${meeting.channelName}`,
+    `${style.notesPrefix}\n   • Please review any materials beforehand\n   • Be prepared with your questions\n   • Meeting notes will be shared in the channel`
+  ].join(style.separator);
+
+  // Add footer
+  if (style.footer) {
+    message += style.footer;
+  }
+
+  // Add closing decorator
+  if (style.decorator) {
+    message += `\n\n${style.decorator}`;
+  }
+
+  return message;
+}
+
+function createConversationState() {
+  return {
+    step: 'initial',
+    data: {
+      title: '',
+      agenda: '',
+      time: '',
+      channelName: '',
+      theme: 'corporate'
     },
-    minimal: {
-      prefix: "→",
-      separator: " | ",
-      titlePrefix: "",
-      agendaPrefix: "",
-      timePrefix: "",
-    },
-    product: {
-      prefix: "🎯",
-      separator: "\n\n",
-      decorator: "━━━━━━━━━━━━━━━━━━━━━━━",
-      titlePrefix: "📌 **Title**",
-      agendaPrefix: "📝 **Agenda**",
-      timePrefix: "⏰ **Time**",
-      footer: "\n*Your presence matters. See you there!* ✨",
-    },
-    modern: {
-      prefix: "🔷",
-      separator: "\n\n",
-      decorator: "──────────────────────",
-      titlePrefix: "💫 **Title**",
-      agendaPrefix: "📋 **Agenda**",
-      timePrefix: "🕒 **Time**",
-      footer: "\n\n*Join us for an insightful discussion* 🚀",
-    },
-    elegant: {
-      prefix: "✧",
-      separator: "\n\n",
-      decorator: "•═══════════════════•",
-      titlePrefix: "✦ **Title**",
-      agendaPrefix: "✧ **Agenda**",
-      timePrefix: "✦ **Time**",
-      footer: "\n\n*Looking forward to your valuable contribution* ⭐",
-    },
+    lastUpdateTime: Date.now()
   };
+}
 
-  const style = themes[theme] || themes.product;
+async function handleConversationStep(message, state) {
+  const content = message.content.toLowerCase();
+  
+  switch (state.step) {
+    case 'initial':
+      await message.reply(
+        "What would you like to do?\n" +
+        "1️⃣ Add a new meeting\n" +
+        "2️⃣ List meetings\n" +
+        "3️⃣ Delete a meeting\n" +
+        "4️⃣ Update a meeting\n\n" +
+        "Just type the number or action you want!"
+      );
+      state.step = 'action_choice';
+      break;
 
-  return (
-    `${style.decorator ? style.decorator + "\n\n" : ""}` +
-    `${style.prefix} **Meeting Details**${style.separator}` +
-    `${style.titlePrefix}: ${meeting.title}${style.separator}` +
-    `${style.agendaPrefix}: ${meeting.agenda}${style.separator}` +
-    `${style.timePrefix}: ${meeting.time}` +
-    `${style.footer || ""}` +
-    `${style.decorator ? "\n\n" + style.decorator : ""}`
-  );
+    case 'action_choice':
+      if (['1', 'add', 'new', 'create'].includes(content)) {
+        await message.reply("Please enter the meeting title:");
+        state.step = 'title';
+      } else if (['2', 'list', 'show'].includes(content)) {
+        await handleListCommand(message);
+        state.step = 'initial';
+      } else if (['3', 'delete', 'remove'].includes(content)) {
+        await message.reply("Please enter the meeting ID to delete:");
+        state.step = 'delete';
+      } else if (['4', 'update', 'edit'].includes(content)) {
+        await message.reply("Please enter the meeting ID to update:");
+        state.step = 'update_id';
+      } else {
+        await message.reply("I didn't understand that. Please choose a number between 1-4 or type the action.");
+      }
+      break;
+
+    case 'title':
+      state.data.title = message.content;
+      await message.reply("Great! Now enter the agenda items (separate items with numbers like:\n1. First item\n2. Second item):");
+      state.step = 'agenda';
+      break;
+
+    case 'agenda':
+      state.data.agenda = message.content;
+      await message.reply("When should the meeting take place? (Format: HH:MM, e.g., 14:30):");
+      state.step = 'time';
+      break;
+
+    case 'time':
+      if (/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(content)) {
+        state.data.time = content;
+        await message.reply(
+          `Which channel should I post this in?\nAvailable channels: ${Object.keys(NOTIFICATION_CHANNELS).join(", ")}`
+        );
+        state.step = 'channel';
+      } else {
+        await message.reply("Please enter a valid time in HH:MM format (e.g., 14:30):");
+      }
+      break;
+
+    case 'channel':
+      if (NOTIFICATION_CHANNELS[content]) {
+        state.data.channelName = content;
+        await message.reply(
+          "Choose a theme for your meeting:\n" +
+          "1. executive - Formal executive meetings\n" +
+          "2. corporate - Professional business meetings\n" +
+          "3. modern - Contemporary casual meetings\n" +
+          "4. minimal - Clean and simple style\n" +
+          "5. product - Product-focused meetings\n" +
+          "6. holiday - Festive celebrations\n" +
+          "7. intern - Learning sessions\n" +
+          "\nType the theme name or number:"
+        );
+        state.step = 'theme';
+      } else {
+        await message.reply(`Invalid channel. Please choose from: ${Object.keys(NOTIFICATION_CHANNELS).join(", ")}`);
+      }
+      break;
+
+    case 'theme':
+      const themeMap = {
+        '1': 'executive',
+        '2': 'corporate',
+        '3': 'modern',
+        '4': 'minimal',
+        '5': 'product',
+        '6': 'holiday',
+        '7': 'intern'
+      };
+
+      const selectedTheme = themeMap[content] || content;
+      if (themes[selectedTheme]) {
+        state.data.theme = selectedTheme;
+        // Create the meeting using existing add logic
+        const newMeeting = {
+          id: (await loadMeetings()).length + 1,
+          ...state.data,
+          channelId: NOTIFICATION_CHANNELS[state.data.channelName],
+          createdAt: new Date().toISOString()
+        };
+
+        try {
+          const meetings = await loadMeetings();
+          meetings.push(newMeeting);
+          await saveMeetings(meetings);
+          
+          const notificationMsg = formatMeetingMessage(newMeeting, state.data.theme);
+          await sendNotification(NOTIFICATION_CHANNELS[state.data.channelName], notificationMsg);
+          
+          await message.reply("✅ Meeting has been created successfully!");
+        } catch (error) {
+          await message.reply("❌ There was an error creating the meeting. Please try again.");
+        }
+        
+        // Reset conversation state
+        conversationStates.delete(message.author.id);
+      } else {
+        await message.reply("Please choose a valid theme name or number.");
+      }
+      break;
+
+    case 'delete':
+      const idToDelete = parseInt(content);
+      if (isNaN(idToDelete)) {
+        await message.reply("Please enter a valid meeting ID number:");
+        return;
+      }
+      
+      const meetings = await loadMeetings();
+      const meetingToDelete = meetings.find(m => m.id === idToDelete);
+      
+      if (!meetingToDelete) {
+        await message.reply(`❌ No meeting found with ID: ${idToDelete}`);
+      } else {
+        const updatedMeetings = meetings.filter(m => m.id !== idToDelete);
+        await saveMeetings(updatedMeetings);
+        await message.reply(`✅ Meeting with ID ${idToDelete} has been deleted.`);
+      }
+      
+      conversationStates.delete(message.author.id);
+      break;
+  }
+  
+  state.lastUpdateTime = Date.now();
+}
+
+// Add this function before the client initialization
+
+async function handleListCommand(message) {
+  try {
+    const meetings = await loadMeetings();
+    
+    if (meetings.length === 0) {
+      await message.reply("No meetings are currently scheduled.");
+      return;
+    }
+
+    // Sort meetings by time
+    meetings.sort((a, b) => {
+      const timeA = a.time.split(':').map(Number);
+      const timeB = b.time.split(':').map(Number);
+      return (timeA[0] * 60 + timeA[1]) - (timeB[0] * 60 + timeB[1]);
+    });
+
+    // Create a summary message
+    let summary = "**📋 Scheduled Meetings**\n\n";
+    
+    meetings.forEach((meeting) => {
+      summary += `**ID:** ${meeting.id}\n`;
+      summary += `**Title:** ${meeting.title}\n`;
+      summary += `**Time:** ${meeting.time}\n`;
+      summary += `**Channel:** #${meeting.channelName}\n`;
+      summary += `**Theme:** ${meeting.theme}\n`;
+      summary += "───────────────\n\n";
+    });
+
+    // Split long messages if necessary (Discord has a 2000 character limit)
+    if (summary.length > 1900) {
+      const chunks = summary.match(/.{1,1900}/g);
+      for (const chunk of chunks) {
+        await message.reply(chunk);
+      }
+    } else {
+      await message.reply(summary);
+    }
+  } catch (error) {
+    console.error("Error listing meetings:", error);
+    await message.reply("❌ There was an error listing the meetings. Please try again.");
+  }
 }
 
 // Initialize Discord Bot
@@ -158,17 +426,17 @@ function parseQuotedArgs(content) {
     agenda: "",
     time: "",
     channelName: "",
+    theme: "" 
   };
 
-  // Match patterns like title:"value" or title: "value"
   const patterns = {
     title: /title:\s*"([^"]*)"/i,
     agenda: /agenda:\s*"([^"]*)"/i,
     time: /time:\s*"([^"]*)"/i,
     channelName: /channelName:\s*"([^"]*)"/i,
+    theme: /theme:\s*"([^"]*)"/i  
   };
 
-  // Extract values for each field
   for (const [field, pattern] of Object.entries(patterns)) {
     const match = argsText.match(pattern);
     if (match) {
@@ -218,216 +486,30 @@ async function sendNotification(channelId, message) {
 }
 
 client.on("messageCreate", async (message) => {
-  if (message.channel.id !== COMMAND_CHANNEL_ID || message.author.bot) return;
-
-  console.log("=== COMMAND RECEIVED ===");
-  console.log("Content:", message.content);
-  console.log("Author:", message.author.tag);
-  console.log("Channel:", message.channel.name);
-
-  const [command, ...args] = message.content.trim().split(/\s+/);
-
-  switch (command.toLowerCase()) {
-    case "/add": {
-      console.log("=== PROCESSING ADD COMMAND ===");
-
-      // Parse the quoted arguments
-      const args = parseQuotedArgs(message.content);
-      console.log("Parsed arguments:", args);
-
-      // Validate all required fields are present
-      if (!args.title || !args.agenda || !args.time || !args.channelName) {
-        console.log("Missing required fields");
-        return message.reply(
-          'Usage: `/add title:"Meeting Title" agenda:"Meeting Agenda" time:"15:00" channelName:"general"`'
-        );
-      }
-
-      const { title, agenda, time, channelName } = args;
-
-      console.log("Command parameters:", { title, agenda, time, channelName });
-      console.log(
-        "Target channel:",
-        NOTIFICATION_CHANNELS[channelName.toLowerCase()]
-      );
-
-      if (!NOTIFICATION_CHANNELS[channelName.toLowerCase()]) {
-        console.log("Invalid channel name provided");
-        return message.reply(
-          `❌ Invalid channel name. Available channels: ${Object.keys(
-            NOTIFICATION_CHANNELS
-          ).join(", ")}`
-        );
-      }
-
-      try {
-        console.log("1. Loading existing meetings...");
-        const meetings = await loadMeetings();
-
-        const newMeeting = {
-          id: meetings.length + 1,
-          title,
-          agenda,
-          time,
-          channelName,
-          channelId: NOTIFICATION_CHANNELS[channelName],
-          createdAt: new Date().toISOString(),
-        };
-
-        console.log("2. New meeting object:", newMeeting);
-
-        console.log("3. Saving meeting...");
-        meetings.push(newMeeting);
-        await saveMeetings(meetings);
-        console.log("4. Meeting saved successfully");
-
-        console.log("5. Sending confirmation...");
-        await message.reply(`✅ Meeting added for ${channelName} channel`);
-
-        console.log("6. Preparing notification...");
-        const notificationMsg = formatMeetingMessage(newMeeting, THEME);
-        console.log("7. Notification message:", notificationMsg);
-
-        console.log("8. Sending notification...");
-        const notificationSent = await sendNotification(
-          NOTIFICATION_CHANNELS[channelName],
-          notificationMsg
-        );
-
-        if (!notificationSent) {
-          console.log("9. Notification failed, sending warning...");
-          await message.reply(
-            `⚠️ Warning: Meeting was saved but notification couldn't be sent to ${channelName} channel. Please check bot permissions.`
-          );
-        } else {
-          console.log("9. Notification sent successfully");
-        }
-
-        console.log("=== ADD COMMAND COMPLETE ===");
-      } catch (error) {
-        console.error("=== ERROR IN ADD COMMAND ===");
-        console.error("Error details:", error);
-        console.error("Stack trace:", error.stack);
-        await message.reply(
-          "❌ An error occurred while processing your command. Please try again."
-        );
-      }
-      break;
-    }
-    case "/delete": {
-      if (args.length !== 1) {
-        return message.reply("Usage: `/delete {id}`");
-      }
-      const idToDelete = parseInt(args[0], 10);
-      const meetings = await loadMeetings();
-      const meetingToDelete = meetings.find((m) => m.id === idToDelete);
-
-      if (!meetingToDelete) {
-        return message.reply(`❌ No meeting found with ID: ${idToDelete}`);
-      }
-
-      const updatedMeetings = meetings.filter((m) => m.id !== idToDelete);
-      await saveMeetings(updatedMeetings);
-
-      // Notify both command and target channels
-      await message.reply(`✅ Meeting with ID ${idToDelete} deleted.`);
-      await sendNotification(
-        meetingToDelete.channelId,
-        `🗑️ A meeting has been cancelled:\n${formatMeetingMessage(
-          meetingToDelete,
-          THEME
-        )}`
-      );
-      break;
-    }
-
-    case "/update": {
-      if (args.length < 5) {
-        return message.reply(
-          "Usage: `/update {id} {title} {agenda} {time} {channel-name}`"
-        );
-      }
-      const idToUpdate = parseInt(args[0], 10);
-      const updatedTitle = args[1];
-      const updatedAgenda = args[2];
-      const updatedTime = args[3];
-      const updatedChannelName = args[4].toLowerCase();
-
-      if (!NOTIFICATION_CHANNELS[updatedChannelName]) {
-        return message.reply(
-          `❌ Invalid channel name. Available channels: ${Object.keys(
-            NOTIFICATION_CHANNELS
-          ).join(", ")}`
-        );
-      }
-
-      const meetings = await loadMeetings();
-      const meetingIndex = meetings.findIndex((m) => m.id === idToUpdate);
-
-      if (meetingIndex === -1) {
-        return message.reply(`❌ No meeting found with ID: ${idToUpdate}`);
-      }
-
-      const oldMeeting = meetings[meetingIndex];
-      const updatedMeeting = {
-        ...oldMeeting,
-        title: updatedTitle,
-        agenda: updatedAgenda,
-        time: updatedTime,
-        channelName: updatedChannelName,
-        channelId: NOTIFICATION_CHANNELS[updatedChannelName],
-        updatedAt: new Date().toISOString(),
-      };
-
-      meetings[meetingIndex] = updatedMeeting;
-      await saveMeetings(meetings);
-
-      // Notify both old and new channels if channel changed
-      await message.reply(`✅ Meeting with ID ${idToUpdate} updated.`);
-
-      if (oldMeeting.channelId !== updatedMeeting.channelId) {
-        await sendNotification(
-          oldMeeting.channelId,
-          `📝 Meeting has been moved to #${updatedChannelName}`
-        );
-      }
-
-      await sendNotification(
-        updatedMeeting.channelId,
-        `📝 Meeting updated:\n${formatMeetingMessage(updatedMeeting, THEME)}`
-      );
-      break;
-    }
-
-    case "/list": {
-      const meetings = await loadMeetings();
-      if (meetings.length === 0) {
-        return message.reply("No meetings scheduled.");
-      }
-
-      let reply = "**📅 Scheduled Meetings**\n\n";
-      meetings.forEach((meeting) => {
-        reply +=
-          `**ID**: ${meeting.id}\n` +
-          `**Title**: ${meeting.title}\n` +
-          `**Agenda**: ${meeting.agenda}\n` +
-          `**Time**: ${meeting.time}\n` +
-          `**Channel**: ${meeting.channelName}\n\n`;
-      });
-
-      await message.reply(reply);
-      break;
-    }
-
-    default:
-      return message.reply(
-        "Available commands:\n" +
-          "`/add {title} {agenda} {time} {channel-name}`\n" +
-          "`/delete {id}`\n" +
-          "`/update {id} {title} {agenda} {time} {channel-name}`\n" +
-          "`/list`"
-      );
+  if (message.author.bot) return;
+  
+  // Check if it's a simple greeting
+  const greetings = ['hi', 'hello', 'hey', 'start', 'help'];
+  if (greetings.includes(message.content.toLowerCase())) {
+    const state = createConversationState();
+    conversationStates.set(message.author.id, state);
+    await handleConversationStep(message, state);
+    return;
   }
+
+  // Get existing conversation state or return if none exists
+  let state = conversationStates.get(message.author.id);
+  if (!state) return;
+
+  // Check for conversation timeout
+  if (Date.now() - state.lastUpdateTime > CONVERSATION_TIMEOUT) {
+    conversationStates.delete(message.author.id);
+    await message.reply("The conversation timed out. Please start again with 'hey'.");
+    return;
+  }
+
+  // Handle the conversation step
+  await handleConversationStep(message, state);
 });
 
 // Login with error handling
@@ -460,4 +542,3 @@ schedule.scheduleJob("0 8 * * *", async () => {
     await sendNotification(channelId, summary);
   }
 });
-
